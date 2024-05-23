@@ -2,9 +2,10 @@ import os
 from collections import defaultdict
 from datetime import datetime
 from glob import glob
-
+#import plotly.graph_objs as go
 import pandas as pd
 import streamlit as st
+import altair as alt
 
 
 def read_site_info():
@@ -30,21 +31,34 @@ def read_general_info():
 
 def kpis_analysis(site, analysis_start_date, analysis_end_date, site_info):
     budget_prod, budget_irr, budget_pr = read_general_info()
-    irradiance_filtered, total_irradiance_period = get_irradiance_period(site, analysis_start_date, analysis_end_date)
-    site_power_filtered, total_energy_period = get_site_level_data(site, analysis_start_date, analysis_end_date)
-    budget_values_date = datetime.combine(analysis_start_date, datetime.min.time())
+    raw_irradiance_period, irradiance_filtered, total_irradiance_period = get_irradiance_period(site, analysis_start_date, analysis_end_date)
+    site_power_period, site_power_filtered, total_energy_period = get_site_level_data(site, analysis_start_date, analysis_end_date)
+    budget_values_date = datetime.combine(analysis_start_date, datetime.min.time()).replace(day=1)
 
     # Calculate PR%
-    pr_period = (total_energy_period*1000) / (total_irradiance_period * site_info.loc[site,'Nominal Power DC'])
+    pr_period = (total_energy_period) / (total_irradiance_period * site_info.loc[site,'Nominal Power DC'])
     print('Site PR%: ' , format(pr_period, ".2%"))
 
-    '''full_results = pd.DataFrame(data=form.results.cashflows,
-                                columns=['Date', 'Volume', 'Discount', 'Certificates', 'Value'], )'''
+    #Populate results table
+    actual, budget = populate_results_df(site, budget_values_date, pr_period,
+                                         total_energy_period, total_irradiance_period,
+                                         budget_pr, budget_prod, budget_irr)
 
-    #index = ["Availability:", "PR(%):", "Energy Produced:", "Irradiance:", "Total Losses:"]
+    #Get chart data
+    print(site_power_period)
+    raw_data = site_power_period.join(raw_irradiance_period[["Avg Irradiance POA", "Avg Irradiance GHI"]])
+    print(raw_data)
+
+
+    return get_results_table(site, actual, budget), get_chart_results(site, raw_data)
+
+
+def populate_results_df(site, budget_values_date,
+                        pr_period, total_energy_period, total_irradiance_period,
+                        budget_pr, budget_prod, budget_irr):
 
     actual = [None, None, None, None, None]
-    budget = ['100.00 %', None, None, None,'0']
+    budget = ['100.00 %', None, None, None, '0']
 
     actual[1] = format(pr_period, ".2%")
     actual[2] = format(total_energy_period, ".2f")
@@ -54,7 +68,8 @@ def kpis_analysis(site, analysis_start_date, analysis_end_date, site_info):
     budget[2] = format(budget_prod.loc[site, budget_values_date], ".2f")
     budget[3] = format(budget_irr.loc[site, budget_values_date], ".2f")
 
-    return get_results_table(site, actual, budget)
+
+    return actual, budget
 
 def get_irradiance_period(site, analysis_start_date, analysis_end_date):
     # Get start row of data, path to file and dataframe
@@ -64,16 +79,21 @@ def get_irradiance_period(site, analysis_start_date, analysis_end_date):
 
     # Get relevant column and granularity of data
     columns_poa = df_irradiance.columns[df_irradiance.columns.str.contains("POA")]
+    columns_ghi = df_irradiance.columns[df_irradiance.columns.str.contains("GHI")]
+
     granularity = (df_irradiance.index[1]-df_irradiance.index[0]).seconds/3600
 
     # Average data, filter for threshold and timestamps
-    df_irradiance["Average POA"] = df_irradiance[columns_poa].mean(axis=1)
-    irradiance_filtered = df_irradiance.loc[(df_irradiance["Average POA"] > 50)][analysis_start_date:analysis_end_date]
+    df_irradiance["Avg Irradiance POA"] = df_irradiance[columns_poa].mean(axis=1)
+    df_irradiance["Avg Irradiance GHI"] = df_irradiance[columns_ghi].mean(axis=1)
+
+    raw_irradiance_period = df_irradiance[analysis_start_date:analysis_end_date]
+    irradiance_filtered = df_irradiance.loc[(df_irradiance["Avg Irradiance POA"] > 0)][analysis_start_date:analysis_end_date]
 
     # Calculate total irradiance in period
-    total_irradiance_period = (irradiance_filtered["Average POA"].sum()/1000) * granularity
+    total_irradiance_period = (irradiance_filtered["Avg Irradiance POA"].sum()/1000) * granularity
 
-    return irradiance_filtered, total_irradiance_period
+    return raw_irradiance_period, irradiance_filtered, total_irradiance_period
 
 def get_site_level_data(site, analysis_start_date, analysis_end_date):
     # Get start row of data, path to file and dataframe
@@ -82,17 +102,20 @@ def get_site_level_data(site, analysis_start_date, analysis_end_date):
     df_power_site = pd.read_excel(power_export_path, header=start_row, index_col=0)
 
     #Get relevant column and granularity of data
-    column_power = df_power_site.columns[df_power_site.columns.str.contains('MLG_MLG')][0]
+    column_site_power = df_power_site.columns[df_power_site.columns.str.contains('MLG_MLG')][0]
+    df_power_site.rename(columns={column_site_power: "Site Power"}, inplace=True)
+    #column_feeder_power = df_power_site.columns[df_power_site.columns.str.contains('MLG_MIL')]
     granularity = (df_power_site.index[1] - df_power_site.index[0]).seconds / 3600
 
     # Get dataset filtered by night values and timestamps
-    print(column_power)
-    site_power_filtered = df_power_site.loc[~(df_power_site[column_power] < 0)][analysis_start_date:analysis_end_date]
+    power_period = df_power_site[analysis_start_date:analysis_end_date]
+    site_power_period = power_period[["Site Power"]]*1000
+    site_power_filtered = site_power_period.loc[~(site_power_period["Site Power"] < 0)]
 
     # Calculate total energy exported in period
-    total_energy_period = (df_power_site[column_power].sum()) * granularity
+    total_energy_period = (site_power_period["Site Power"].sum()) * granularity
 
-    return site_power_filtered, total_energy_period
+    return site_power_period, site_power_filtered, total_energy_period
 
 
 def get_results_table(site = False,
@@ -106,6 +129,33 @@ def get_results_table(site = False,
     index = ["Availability:", "PR(%):", "Energy Produced (kWh):", "Irradiation:", "Total Losses (kWh):"]
     # Create the DataFrame
     return pd.DataFrame(data, index=index)
+
+
+def get_chart_results(site = False, data = 0, index = 0):
+    if site:
+        data.index.names = ['Timestamp']
+        data = data.reset_index()
+
+
+        irradiance_poa = alt.Chart(data).mark_line().encode(
+            x='Timestamp', y='Avg Irradiance POA', color=alt.value("#1f77b4"))
+
+        #irradiance_ghi = alt.Chart(data).mark_area(opacity=0.9).encode(
+         #   x='Timestamp', y='Avg Irradiance GHI')
+
+        site_power = alt.Chart(data).mark_line().encode(
+            x='Timestamp', y='Site Power', color=alt.value("#ff7f0e"))
+
+        chart_data = alt.layer(irradiance_poa, site_power).resolve_scale(
+            y='independent')
+
+
+
+        #pd.DataFrame(data) #, index=index)
+    else:
+        chart_data = pd.DataFrame({'No data' : [0]})
+
+    return chart_data
 
 
 
@@ -159,7 +209,11 @@ if __name__ == '__main__':
 
             with r1_2:
                 results_table = st.empty()
-                results_table.dataframe(get_results_table(site), use_container_width=True)
+                results_table.dataframe(get_results_table(), use_container_width=True)
+
+        with st.container():
+            results_chart = st.empty()
+            #results_chart.scatter_chart(get_chart_results(), use_container_width=True)
 
     with (debug_tab):
         debug_text = st.empty()
@@ -173,7 +227,7 @@ if __name__ == '__main__':
             profiler = Profiler()
             profiler.start()
 
-            result = kpis_analysis(site, analysis_start_date, analysis_end_date, SITE_INFO)
+            result, chart = kpis_analysis(site, analysis_start_date, analysis_end_date, SITE_INFO)
 
             profiler.stop()
             profile_mainkpis = profiler.output_text()
@@ -182,6 +236,8 @@ if __name__ == '__main__':
 
             st.snow()
             results_table.dataframe(result, use_container_width=True)
+            #results_chart.line_chart(chart, use_container_width=True)
+            results_chart.altair_chart(chart, use_container_width=True)
 
 
 
