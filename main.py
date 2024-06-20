@@ -1,14 +1,11 @@
 import os
-from collections import defaultdict
 from datetime import datetime
 from glob import glob
-#import plotly.graph_objs as go
 import pandas as pd
 import streamlit as st
 import altair as alt
-import datetime as dt
-import re
 import loadData
+import calcData
 
 def populate_results_df(site, budget_values_date,
                         pr_period, total_energy_period, total_irradiance_period,
@@ -29,7 +26,7 @@ def populate_results_df(site, budget_values_date,
     return actual, budget
 
 
-def kpis_analysis(site, analysis_start_date, analysis_end_date, site_info):
+def kpis_analysis(site, analysis_start_date, analysis_end_date, months, site_info):
 
     raw_irradiance_period, irradiance_period_15m, irradiance_filtered, total_irradiance_period = loadData.get_irradiance_period(site, analysis_start_date, analysis_end_date)
     site_power_period, site_power_filtered, total_energy_period = loadData.get_site_level_data(site, analysis_start_date, analysis_end_date)
@@ -38,6 +35,18 @@ def kpis_analysis(site, analysis_start_date, analysis_end_date, site_info):
     # Calculate PR%
     pr_period = (total_energy_period) / (total_irradiance_period * site_info.loc[site,'Nominal Power DC'])
     print('Site PR%: ' , format(pr_period, ".2%"))
+
+    #Get Availability results
+
+    all_data_df = loadData.get_inverter_level_data(site, analysis_start_date, analysis_end_date, months, raw_irradiance_period, "AC Power")
+    df_timedelta = all_data_df.index[1] - all_data_df.index[0]
+
+    df_all_incidents = loadData.get_incidents_df(all_data_df, component_data, site)
+    df_all_incidents = calcData.calculate_incident_losses(df_all_incidents, all_data_df, site, all_general_info,
+                                                          budget_pr, df_timedelta)
+
+    site_availability, inverter_availability = calcData.calculate_availability(df_all_incidents, all_data_df, df_timedelta)
+
 
     #Populate results table
     actual, budget = populate_results_df(site, budget_values_date, pr_period,
@@ -163,7 +172,7 @@ if __name__ == '__main__':
 
         if 'KPIs' in analysis:
 
-            result, chart, irradiance_data = kpis_analysis(site, analysis_start_date, analysis_end_date, SITE_INFO)
+            result, chart, irradiance_data = kpis_analysis(site, analysis_start_date, analysis_end_date, months, SITE_INFO)
 
 
             results_table.dataframe(result, use_container_width=True)
