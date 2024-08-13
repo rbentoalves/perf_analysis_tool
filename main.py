@@ -27,9 +27,12 @@ def populate_results_df(site, budget_values_date,
 
 
 def kpis_analysis(site, analysis_start_date, analysis_end_date, months, site_info):
-
-    raw_irradiance_period, irradiance_period_15m, irradiance_filtered, total_irradiance_period = loadData.get_irradiance_period(site, analysis_start_date, analysis_end_date)
-    site_power_period, site_power_filtered, total_energy_period = loadData.get_site_level_data(site, analysis_start_date, analysis_end_date)
+    print("Reading Irradiance")
+    raw_irradiance_period, irradiance_period_15m, irradiance_filtered, total_irradiance_period = loadData.get_irradiance_period(site, analysis_start_date, analysis_end_date, months)
+    print("Reading site level power")
+    site_power_period, site_power_filtered, total_energy_period = loadData.get_site_level_data(site, analysis_start_date, analysis_end_date, months)
+    print("Reading Budget data")
+    #add other months, right now it only looks at the first
     budget_values_date = datetime.combine(analysis_start_date, datetime.min.time()).replace(day=1)
 
     # Calculate PR%
@@ -41,11 +44,11 @@ def kpis_analysis(site, analysis_start_date, analysis_end_date, months, site_inf
     all_data_df = loadData.get_inverter_level_data(site, analysis_start_date, analysis_end_date, months, raw_irradiance_period, "AC Power")
     df_timedelta = all_data_df.index[1] - all_data_df.index[0]
 
-    df_all_incidents = loadData.get_incidents_df(all_data_df, component_data, site)
-    df_all_incidents = calcData.calculate_incident_losses(df_all_incidents, all_data_df, site, all_general_info,
-                                                          budget_pr, df_timedelta)
+    #df_all_incidents = loadData.get_incidents_df(all_data_df, component_data, site)
+    #df_all_incidents = calcData.calculate_incident_losses(df_all_incidents, all_data_df, site, all_general_info,
+                                                          #budget_pr, df_timedelta)
 
-    site_availability, inverter_availability = calcData.calculate_availability(df_all_incidents, all_data_df, df_timedelta)
+    #site_availability, inverter_availability = calcData.calculate_availability(df_all_incidents, all_data_df, df_timedelta)
 
 
     #Populate results table
@@ -110,8 +113,8 @@ if __name__ == '__main__':
 
     SITE_INFO = loadData.read_site_info()
     ALL_SITE_LIST = SITE_INFO.index
-    SITE_DATA_AV = [os.path.basename(site) for site in glob(os.path.join(os.getcwd(), 'PerfData', '*'))]
-    SITE_LIST = [site for site in ALL_SITE_LIST if site in SITE_DATA_AV]
+    SITE_LIST = set([os.path.basename(site) for site in glob(os.path.join(os.getcwd(), 'PerfData', '*', '*'))])
+    #SITE_LIST = [site for site in ALL_SITE_LIST if site in SITE_DATA_AV]
 
     #HYPO_ASSETS = fetch_hypo_assets()
 
@@ -161,6 +164,8 @@ if __name__ == '__main__':
         profiler = Profiler()
         profiler.start()
 
+        print(SITE_INFO)
+
         all_general_info, budget_prod, budget_irr, budget_pr, component_data, site_info = loadData.read_general_info()
 
         months = list(pd.date_range(analysis_start_date.replace(day=1),
@@ -169,6 +174,10 @@ if __name__ == '__main__':
         months = [
             str(timestamp.month) + "." + str(timestamp.year) if timestamp.month > 10 else '0' + str(
                 timestamp.month) + "." + str(timestamp.year) for timestamp in months]
+
+        print(analysis_start_date)
+        print(analysis_end_date)
+        print(months)
 
         if 'KPIs' in analysis:
 

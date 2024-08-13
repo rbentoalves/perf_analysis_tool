@@ -3,6 +3,7 @@ from glob import glob
 import pandas as pd
 import datetime as dt
 import re
+pd.options.mode.chained_assignment = None  # default='warn'
 
 
 
@@ -10,7 +11,7 @@ def read_site_info():
     # Use a breakpoint in the code line below to debug your script.
     site_info_path = glob(os.path.join(os.getcwd(), 'General Info', 'Site Info.xlsx'))[0]
     site_info = pd.read_excel(site_info_path).set_index("Site", drop=True)
-    print(site_info)
+
 
 
     return site_info
@@ -27,11 +28,19 @@ def read_general_info():
 
     return all_general_info, budget_prod, budget_irr, budget_pr, component_data, site_info
 
-def get_site_level_data(site, analysis_start_date, analysis_end_date):
+def get_site_level_data(site, analysis_start_date, analysis_end_date, months):
     # Get start row of data, path to file and dataframe
     start_row = 6
-    power_export_path = glob(os.path.join(os.getcwd(), 'PerfData', site, '02. Power', '*.xlsx'))[0]
-    df_power_site = pd.read_excel(power_export_path, header=start_row, index_col=0)
+
+
+    for month in months:
+        power_export_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '02. Power', '*.xlsx'))[0]
+        df_power_site_month = pd.read_excel(power_export_path, header=start_row, index_col=0)
+
+        try:
+            df_power_site = pd.concat([df_power_site, df_power_site_month])
+        except NameError:
+            df_power_site = df_power_site_month
 
     #Get relevant column and granularity of data
     column_site_power = df_power_site.columns[df_power_site.columns.str.contains('MLG_MLG')][0]
@@ -50,8 +59,9 @@ def get_site_level_data(site, analysis_start_date, analysis_end_date):
     return site_power_period, site_power_filtered, total_energy_period
 
 def get_inverter_level_data(site, analysis_start_date, analysis_end_date, months, irradiance_period, datapoint):
+    print(irradiance_period.columns)
     start_row = 6
-    inverter_data_path = glob(os.path.join(os.getcwd(), 'PerfData', site, '04. Inverter Power', datapoint, '*.xlsx'))
+    #inverter_data_path = glob(os.path.join(os.getcwd(), 'PerfData', site, '04. Inverter Power', datapoint, '*.xlsx'))
     for month in months:
         inverter_data_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '04. Inverter Power', datapoint,
                                                '*.xlsx'))  # replace general_folder with os.getcwd()
@@ -73,7 +83,8 @@ def get_inverter_level_data(site, analysis_start_date, analysis_end_date, months
 def get_irradiance_period(site, analysis_start_date, analysis_end_date, months):
     # Get start row of data, path to file and dataframe
     start_row = 5
-    irradiance_path = glob(os.path.join(os.getcwd(), 'PerfData', site, '03. GHI-POA' , '*.xlsx'))[0]
+    print('hi')
+    #irradiance_path = glob(os.path.join(os.getcwd(), 'PerfData', site, '03. GHI-POA' , '*.xlsx'))[0]
     for month in months:
         irradiance_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '03. GHI-POA', '*.xlsx'))[0]
         df_irradiance_list = pd.read_excel(irradiance_path, header=start_row, sheet_name=None, index_col=0)
@@ -208,6 +219,7 @@ def get_incidents_df(all_data_df, component_data, site):
             np_data = inv_data.loc[(inv_data[column] == 0) | (pd.isna(inv_data[column]))]
             if not np_data.empty:
                 component = re.search(r'STS.*IN\d\d', np_data.columns[0]).group()
+                print("Creating incidents for " + component)
                 night_error_component = 0
                 try:
                     component_capacity = \
