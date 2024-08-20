@@ -76,14 +76,13 @@ def get_inverter_level_data(site, analysis_start_date, analysis_end_date, months
             all_data_df_invs = all_data_df_month
 
     all_data_df = pd.concat([irradiance_period[["Avg Irradiance POA", "Avg Irradiance GHI"]], all_data_df_invs], axis=1)
-    all_data_df = all_data_df.loc[(all_data_df["Avg Irradiance POA"] > 1)]
+    all_data_df = all_data_df.loc[(all_data_df["Avg Irradiance POA"] > 20)]
 
     return all_data_df
 
 def get_irradiance_period(site, analysis_start_date, analysis_end_date, months):
     # Get start row of data, path to file and dataframe
     start_row = 5
-    print('hi')
     #irradiance_path = glob(os.path.join(os.getcwd(), 'PerfData', site, '03. GHI-POA' , '*.xlsx'))[0]
     for month in months:
         irradiance_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '03. GHI-POA', '*.xlsx'))[0]
@@ -231,6 +230,8 @@ def get_incidents_df(all_data_df, component_data, site):
                                                                                               night_error_component,
                                                                                               df_timedelta)
 
+
+
                     try:
                         df_all_incidents = pd.concat([df_all_incidents, comp_incident_df])
                     except NameError:
@@ -246,3 +247,31 @@ def get_incidents_df(all_data_df, component_data, site):
 
     return df_all_incidents
 
+def read_Event_Tracker(site):
+    try:
+        event_tracker_path = glob(os.path.join(os.getcwd(), 'Results', site, '*.xlsx'))[0]
+        print(event_tracker_path)
+        df_incidents_ET = pd.read_excel(event_tracker_path, sheet_name='Incidents')
+
+    except IndexError:
+        df_incidents_ET = pd.DataFrame()
+
+
+    return df_incidents_ET
+
+
+def get_setpoint_data(site, months):
+    for month in months:
+        setpoint_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '06. PPC Setpoint', '*.csv'))[0]
+        df_setpoint_month = pd.read_csv(setpoint_path, index_col=0)
+
+        print(df_setpoint_month)
+
+        try:
+            df_setpoint = pd.concat([df_setpoint, df_setpoint_month])
+        except NameError:
+            df_setpoint = df_setpoint_month
+
+    setpoint_df = 'a'
+
+    return setpoint_df
