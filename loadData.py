@@ -85,17 +85,21 @@ def get_irradiance_period(site, analysis_start_date, analysis_end_date, months):
     start_row = 5
     #irradiance_path = glob(os.path.join(os.getcwd(), 'PerfData', site, '03. GHI-POA' , '*.xlsx'))[0]
     for month in months:
+        #print(month)
         irradiance_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '03. GHI-POA', '*.xlsx'))[0]
         df_irradiance_list = pd.read_excel(irradiance_path, header=start_row, sheet_name=None, index_col=0)
         df_irradiance_month = pd.concat(list(df_irradiance_list.values()), axis=1)
         df_irradiance_month = df_irradiance_month.rename_axis('Timestamp (1m)')
+        df_irradiance_month = df_irradiance_month.loc[:, ~df_irradiance_month.columns.str.contains('^Unnamed')]
+
 
         try:
             df_irradiance = pd.concat([df_irradiance, df_irradiance_month])
         except NameError:
             df_irradiance = df_irradiance_month
 
-        # Get relevant column and granularity of data
+
+    # Get relevant column and granularity of data
     columns_poa = df_irradiance.columns[df_irradiance.columns.str.contains("POA")]
     columns_ghi = df_irradiance.columns[df_irradiance.columns.str.contains("GHI")]
 
@@ -272,6 +276,12 @@ def get_setpoint_data(site, months):
         except NameError:
             df_setpoint = df_setpoint_month
 
-    setpoint_df = 'a'
+    events_start = df_setpoint['Data e hora sistema']
 
-    return setpoint_df
+
+
+
+
+    curtailment_inc = 'a'
+
+    return curtailment_inc

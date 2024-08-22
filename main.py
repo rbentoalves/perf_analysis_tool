@@ -9,6 +9,9 @@ import calcData
 import exportData
 
 # TODO Add curtailment calculation and result
+# TODO Add visuals with data read, select component or parameter and day to plot
+# TODO Add Event list to app
+
 def populate_results_df(site, budget_values_date, pr_period, pot_pr_period, corr_pot_pr_period, raw_site_avail,
                         corr_site_avail,total_energy_period, total_irradiance_period, raw_energy_lost, corr_energy_lost,
                         budget_pr,budget_prod, budget_irr):
@@ -41,9 +44,11 @@ def populate_results_df(site, budget_values_date, pr_period, pot_pr_period, corr
 
 def kpis_analysis(site, analysis_start_date, analysis_end_date, months, site_info):
     print("Reading Irradiance")
-    raw_irradiance_period, irradiance_period_15m, irradiance_filtered, total_irradiance_period = loadData.get_irradiance_period(site, analysis_start_date, analysis_end_date, months)
+    raw_irradiance_period, irradiance_period_15m, irradiance_filtered, total_irradiance_period = (
+        loadData.get_irradiance_period(site, analysis_start_date, analysis_end_date, months))
     print("Reading site level power")
-    site_power_period, site_power_filtered, total_energy_period = loadData.get_site_level_data(site, analysis_start_date, analysis_end_date, months)
+    site_power_period, site_power_filtered, total_energy_period = (
+        loadData.get_site_level_data(site, analysis_start_date, analysis_end_date, months))
     print("Reading Budget data")
     #add other months, right now it only looks at the first
     budget_values_date = datetime.combine(analysis_start_date, datetime.min.time()).replace(day=1)
@@ -53,11 +58,11 @@ def kpis_analysis(site, analysis_start_date, analysis_end_date, months, site_inf
     all_data_df = loadData.get_inverter_level_data(site, analysis_start_date, analysis_end_date, months,
                                                    irradiance_period_15m, "AC Power")
 
-    raw_site_avail, raw_inv_avail, corr_site_avail, corr_inv_avail, df_all_incidents, df_approved_incidents = (
-        inverter_outages_analysis(all_data_df, site,all_general_info,budget_pr))
+    raw_site_avail, raw_inv_avail, corr_site_avail, corr_inv_avail, df_incidents_period, df_approved_incidents = (
+        inverter_outages_analysis(all_data_df, site, analysis_start_date, analysis_end_date, all_general_info,budget_pr))
 
     # Calculate PR%
-    raw_energy_lost = df_all_incidents["Energy lost (kWh)"].sum()
+    raw_energy_lost = df_incidents_period["Energy lost (kWh)"].sum()
     corr_energy_lost = df_approved_incidents["Energy lost (kWh)"].sum()
 
     pr_period = (total_energy_period) / (total_irradiance_period * site_info.loc[site, 'Nominal Power DC'])
@@ -84,7 +89,10 @@ def kpis_analysis(site, analysis_start_date, analysis_end_date, months, site_inf
 
     return get_results_table(site, raw, corrected, budget), get_chart_results(site, raw_data), irradiance_period_15m
 
-def inverter_outages_analysis(all_data_df, site, all_general_info, budget_pr):
+def inverter_outages_analysis(all_data_df, site, analysis_start_date, analysis_end_date, all_general_info, budget_pr):
+
+    analysis_start_ts = datetime.strptime((str(analysis_start_date) + " 00:00:00"), '%Y-%m-%d %H:%M:%S')
+    analysis_end_ts = datetime.strptime((str(analysis_end_date) + " 23:45:00"), '%Y-%m-%d %H:%M:%S')
 
     df_timedelta = all_data_df.index[1] - all_data_df.index[0]
 
@@ -104,17 +112,20 @@ def inverter_outages_analysis(all_data_df, site, all_general_info, budget_pr):
 
     event_tracker_path = exportData.create_Event_Tracker(df_all_incidents, site)
 
-    raw_site_avail, raw_inv_avail = calcData.calculate_availability(df_all_incidents, all_data_df, all_general_info,
+    df_incidents_period = df_all_incidents.loc[~(df_all_incidents["Event Start Time"] >= analysis_end_ts)
+                                               & ~(df_all_incidents["Event End Time"] <= analysis_start_ts)]
+
+    raw_site_avail, raw_inv_avail = calcData.calculate_availability(df_incidents_period, all_data_df, all_general_info,
                                                                     df_timedelta)
 
-    print(df_all_incidents)
-    df_approved_incidents = df_all_incidents.loc[~(df_all_incidents["Approved"].isna())]
+    print(df_incidents_period)
+    df_approved_incidents = df_incidents_period[~(df_incidents_period["Approved"].isna())]
     print(df_approved_incidents)
 
     corr_site_avail, corr_inv_avail = calcData.calculate_availability(df_approved_incidents, all_data_df,
                                                                       all_general_info, df_timedelta)
 
-    return raw_site_avail, raw_inv_avail, corr_site_avail, corr_inv_avail, df_all_incidents, df_approved_incidents
+    return raw_site_avail, raw_inv_avail, corr_site_avail, corr_inv_avail, df_incidents_period, df_approved_incidents
 
 def get_results_table(site = False,
                       raw= [None, None, None, None, None, None],
@@ -252,8 +263,11 @@ if __name__ == '__main__':
             all_data_df = loadData.get_inverter_level_data(site, analysis_start_date, analysis_end_date, months,
                                                            irradiance_period_15m, "AC Power")
 
-            raw_site_avail, raw_inv_avail, corr_site_avail, corr_inv_avail, df_all_incidents, df_approved_incidents = (
-                inverter_outages_analysis(all_data_df, site, all_general_info, budget_pr))
+            (raw_site_avail, raw_inv_avail, corr_site_avail, corr_inv_avail,
+             df_incidents_period, df_approved_incidents) = (inverter_outages_analysis(all_data_df, site,
+                                                                                      analysis_start_date,
+                                                                                      analysis_end_date,
+                                                                                      all_general_info, budget_pr))
 
 
 
