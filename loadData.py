@@ -58,6 +58,38 @@ def get_site_level_data(site, analysis_start_date, analysis_end_date, months):
 
     return site_power_period, site_power_filtered, total_energy_period
 
+def get_meter_data(site, analysis_start_date, analysis_end_date, months):
+    # Get start row of data, path to file and dataframe
+
+    for month in months:
+        meter_export_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '01. Energy', '*.xlsx'))[0]
+        df_meter_site_month = pd.read_excel(meter_export_path,
+                                            sheet_name='BASE_MWh_FORMULA', index_col=0)[["kWh rec int"]]
+        df_meter_site_month = df_meter_site_month.drop(labels=0)
+
+
+        try:
+            df_meter_site = df_meter_site.drop(labels=df_meter_site_month.index)
+            df_meter_site = pd.concat([df_meter_site, df_meter_site_month]).sort_index()
+        except NameError:
+            df_meter_site = df_meter_site_month
+
+    #Change index to timestamps, rename column and get granularity of data
+    df_meter_site.index = [pd.to_datetime(re.search(r'.*\s\d+\:\d+\:00', ts.replace(',', ' ')).group(),
+                                          format = "%d/%m/%Y %H:%M:%S") for ts in df_meter_site.index]
+    df_meter_site.rename(columns={'kWh rec int': "Meter Energy (MWh)"}, inplace=True)
+    granularity = (df_meter_site.index[1] - df_meter_site.index[0]).seconds / 3600
+
+    #Filter data for period in question
+    meter_period = df_meter_site[analysis_start_date:analysis_end_date]
+    meter_period["Meter Power (kWh)"] = (meter_period["Meter Energy (MWh)"] * 1000) / granularity
+
+    # Calculate total energy exported in period
+    total_energy_meter_kwh = meter_period["Meter Energy (MWh)"].sum() * 1000
+
+    return meter_period[["Meter Power (kWh)"]], total_energy_meter_kwh
+
+
 def get_inverter_level_data(site, analysis_start_date, analysis_end_date, months, irradiance_period, datapoint):
     print(irradiance_period.columns)
     start_row = 6
@@ -266,8 +298,8 @@ def read_Event_Tracker(site):
 
 def get_setpoint_data(site, months):
     for month in months:
-        setpoint_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '06. PPC Setpoint', '*.csv'))[0]
-        df_setpoint_month = pd.read_csv(setpoint_path, index_col=0)
+        setpoint_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '06. PPC Setpoint', '*.xlsx'))[0]
+        df_setpoint_month = pd.read_csv(setpoint_path, header = 0)
 
         print(df_setpoint_month)
 
@@ -276,7 +308,20 @@ def get_setpoint_data(site, months):
         except NameError:
             df_setpoint = df_setpoint_month
 
-    events_start = df_setpoint['Data e hora sistema']
+    #Rename Columns
+
+    df_setpoint.rename(columns={'Data e hora sistema': 'Timestamp',
+                                'Hierarquia': 'Level',
+                                'Estado': "Setpoint value",
+                                'Descrição': 'Setpoint active'}, inplace=True)
+
+    #SELECT RELEVANT DATA
+    df_setpoint = df_setpoint[['Setpoint value', 'Setpoint active', 'Level']]
+    df_setpoint = df_setpoint.loc[df_setpoint["Level"].str.contains('PPC_MLG - MLG')]
+
+    #GET EVENTS TIMESTAMPS
+    events_start = df_setpoint['Timestamp']
+    events_end = events_start
 
 
 

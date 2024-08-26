@@ -11,6 +11,7 @@ import exportData
 # TODO Add curtailment calculation and result
 # TODO Add visuals with data read, select component or parameter and day to plot
 # TODO Add Event list to app
+# TODO add pvlib and backfill irradiance data with satellite
 
 def populate_results_df(site, budget_values_date, pr_period, pot_pr_period, corr_pot_pr_period, raw_site_avail,
                         corr_site_avail,total_energy_period, total_irradiance_period, raw_energy_lost, corr_energy_lost,
@@ -46,9 +47,16 @@ def kpis_analysis(site, analysis_start_date, analysis_end_date, months, site_inf
     print("Reading Irradiance")
     raw_irradiance_period, irradiance_period_15m, irradiance_filtered, total_irradiance_period = (
         loadData.get_irradiance_period(site, analysis_start_date, analysis_end_date, months))
-    print("Reading site level power")
-    site_power_period, site_power_filtered, total_energy_period = (
-        loadData.get_site_level_data(site, analysis_start_date, analysis_end_date, months))
+
+    #print("Reading site level power")
+    #site_power_period, site_power_filtered, total_energy_period = (loadData.get_site_level_data(site,
+    #                                                                                            analysis_start_date,
+    #                                                                                            analysis_end_date,
+    #                                                                                            months))
+
+    print("Reading meter power")
+    meter_power_period, total_energy_meter = loadData.get_meter_data(site, analysis_start_date, analysis_end_date,
+                                                                     months)
     print("Reading Budget data")
     #add other months, right now it only looks at the first
     budget_values_date = datetime.combine(analysis_start_date, datetime.min.time()).replace(day=1)
@@ -65,11 +73,11 @@ def kpis_analysis(site, analysis_start_date, analysis_end_date, months, site_inf
     raw_energy_lost = df_incidents_period["Energy lost (kWh)"].sum()
     corr_energy_lost = df_approved_incidents["Energy lost (kWh)"].sum()
 
-    pr_period = (total_energy_period) / (total_irradiance_period * site_info.loc[site, 'Nominal Power DC'])
-    pot_pr_period = ((total_energy_period + raw_energy_lost) /
+    pr_period = (total_energy_meter) / (total_irradiance_period * site_info.loc[site, 'Nominal Power DC'])
+    pot_pr_period = ((total_energy_meter + raw_energy_lost) /
                      (total_irradiance_period * site_info.loc[site, 'Nominal Power DC']))
 
-    corr_pot_pr_period = ((total_energy_period + corr_energy_lost) /
+    corr_pot_pr_period = ((total_energy_meter + corr_energy_lost) /
                           (total_irradiance_period * site_info.loc[site, 'Nominal Power DC']))
 
     print('Site PR%: ', format(pr_period, ".2%"))
@@ -77,17 +85,15 @@ def kpis_analysis(site, analysis_start_date, analysis_end_date, months, site_inf
 
     #Populate results table
     raw, corrected, budget = populate_results_df(site, budget_values_date, pr_period, pot_pr_period, corr_pot_pr_period,
-                                              raw_site_avail,corr_site_avail, total_energy_period,
+                                              raw_site_avail,corr_site_avail, total_energy_meter,
                                               total_irradiance_period, raw_energy_lost, corr_energy_lost, budget_pr,
                                               budget_prod, budget_irr)
 
     #Get chart data
-    #print(site_power_period)
-    raw_data = site_power_period.join(raw_irradiance_period[["Avg Irradiance POA", "Avg Irradiance GHI"]])
-    #print(raw_data)
+    raw_data = meter_power_period.join(raw_irradiance_period[["Avg Irradiance POA", "Avg Irradiance GHI"]])
 
-
-    return get_results_table(site, raw, corrected, budget), get_chart_results(site, raw_data), irradiance_period_15m
+    return (get_results_table(site, raw, corrected, budget), get_chart_results(site, raw_data), irradiance_period_15m,
+            df_incidents_period)
 
 def inverter_outages_analysis(all_data_df, site, analysis_start_date, analysis_end_date, all_general_info, budget_pr):
 
@@ -114,6 +120,15 @@ def inverter_outages_analysis(all_data_df, site, analysis_start_date, analysis_e
 
     df_incidents_period = df_all_incidents.loc[~(df_all_incidents["Event Start Time"] >= analysis_end_ts)
                                                & ~(df_all_incidents["Event End Time"] <= analysis_start_ts)]
+
+    print(df_incidents_period)
+    df_incidents_period["Event Start Time"] = [timestamp if timestamp >= analysis_start_ts else analysis_start_ts
+                                               for timestamp in df_incidents_period["Event Start Time"]]
+    df_incidents_period["Event End Time"] = [timestamp if timestamp <= analysis_end_ts else analysis_end_ts
+                                               for timestamp in df_incidents_period["Event End Time"]]
+
+    df_incidents_period = calcData.calculate_incident_losses(df_incidents_period, all_data_df, site, all_general_info,
+                                                             budget_pr, df_timedelta)
 
     raw_site_avail, raw_inv_avail = calcData.calculate_availability(df_incidents_period, all_data_df, all_general_info,
                                                                     df_timedelta)
@@ -152,20 +167,20 @@ def get_chart_results(site = False, data = 0, index = 0):
         irradiance_poa = alt.Chart(data).mark_line().encode(
             x='Timestamp', y='Avg Irradiance POA', color=alt.value("#1f77b4"))
 
-        #irradiance_ghi = alt.Chart(data).mark_area(opacity=0.9).encode(
-         #   x='Timestamp', y='Avg Irradiance GHI')
+        meter_power = alt.Chart(data).mark_line().encode(
+            x='Timestamp', y='Meter Power (kWh)', color=alt.value("#ff7f0e"))
 
-        site_power = alt.Chart(data).mark_line().encode(
-            x='Timestamp', y='Site Power', color=alt.value("#ff7f0e"))
+        #site_power = alt.Chart(data).mark_line().encode(
+        #    x='Timestamp', y='Site Power', color=alt.value("#ff7f0e"))
 
-        chart_data = alt.layer(irradiance_poa, site_power).resolve_scale(
+        chart_data = alt.layer(irradiance_poa, meter_power).resolve_scale(
             y='independent')
 
 
 
         #pd.DataFrame(data) #, index=index)
     else:
-        chart_data = pd.DataFrame({'No data' : [0]})
+        chart_data = pd.DataFrame({'No data': [0]})
 
     return chart_data
 
@@ -220,6 +235,9 @@ if __name__ == '__main__':
             results_chart = st.empty()
             #results_chart.scatter_chart(get_chart_results(), use_container_width=True)
 
+    with (inverter_dd_tab):
+        inv_outages_table = st.empty()
+
     with (debug_tab):
         debug_text = st.empty()
         debug_text.code(profile_mainkpis)
@@ -248,12 +266,14 @@ if __name__ == '__main__':
 
         if 'KPIs' in analysis:
 
-            result, chart, irradiance_data = kpis_analysis(site, analysis_start_date, analysis_end_date, months, SITE_INFO)
+            result, chart, irradiance_data, df_incidents_period = kpis_analysis(site, analysis_start_date,
+                                                                                analysis_end_date, months, SITE_INFO)
 
 
             results_table.dataframe(result, use_container_width=True)
             #results_chart.line_chart(chart, use_container_width=True)
             results_chart.altair_chart(chart, use_container_width=True)
+            inv_outages_table.dataframe(df_incidents_period, use_container_width=True)
 
         if "Inverter outages" in analysis and "KPIs" not in analysis:
             print("Reading Irradiance")

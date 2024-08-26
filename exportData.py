@@ -4,6 +4,9 @@ from glob import glob
 
 
 def create_Event_Tracker(df_all_incidents, site):
+
+    df_approved_incidents = df_all_incidents[~(df_all_incidents["Approved"].isna())]
+
     general_folder = glob(os.path.join(os.getcwd(), 'Results', site))[0]
     print(general_folder)
     event_tracker_path = general_folder + "/Event Tracker " + site + ".xlsx"
@@ -12,6 +15,7 @@ def create_Event_Tracker(df_all_incidents, site):
     workbook = writer.book
 
     df_all_incidents.to_excel(writer, sheet_name='Incidents', index=False)
+    df_approved_incidents.to_excel(writer, sheet_name='Approved Incidents', index=False)
 
     writer.close()
 
