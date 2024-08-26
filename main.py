@@ -221,8 +221,9 @@ if __name__ == '__main__':
                         def disable(b):
                             st.session_state["analysis_run_disabled"] = b
 
-                        run_analysis_btn = st.button('Run Analysis', use_container_width=True, on_click=disable, args=(True,),
-                                                     disabled=st.session_state.get("analysis_run_disabled", False))
+                        run_analysis_btn = st.button('Run Analysis', use_container_width=True, on_click=disable,
+                                                     args=(True,),)
+                                                     # disabled=st.session_state.get("analysis_run_disabled", False))
 
                         if st.button("Reset All?", on_click=disable, args=(False,), use_container_width=True):
                             st.rerun()
@@ -296,7 +297,30 @@ if __name__ == '__main__':
 
         if "Curtailment" in analysis and "KPIs" not in analysis:
 
-            setpoints_df = loadData.get_setpoint_data(site, months)
+            curtailment_df = loadData.get_setpoint_data(site, months, SITE_INFO)
+
+            print("Reading Irradiance")
+            raw_irradiance_period, irradiance_period_15m, irradiance_filtered, total_irradiance_period = (
+                loadData.get_irradiance_period(site, analysis_start_date, analysis_end_date, months))
+
+            #TODO transform data to 5 min
+
+            print("Reading meter power")
+            meter_power_period, total_energy_meter = loadData.get_meter_data(site, analysis_start_date,
+                                                                             analysis_end_date,months)
+
+            print("Reading event tracker")
+            df_incidents_ET = loadData.read_Event_Tracker(site)
+
+            df_timedelta = irradiance_period_15m.index[1] - irradiance_period_15m.index[0]
+
+            site_data = meter_power_period.join(raw_irradiance_period[["Avg Irradiance POA", "Avg Irradiance GHI"]])
+            print(site_data)
+
+            curtailment_df = calcData.calculate_curtailment_losses(curtailment_df, site_data, site,
+                                                                   all_general_info, budget_pr, df_timedelta)
+
+
 
 
 

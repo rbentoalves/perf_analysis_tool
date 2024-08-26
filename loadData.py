@@ -296,12 +296,11 @@ def read_Event_Tracker(site):
     return df_incidents_ET
 
 
-def get_setpoint_data(site, months):
+def get_setpoint_data(site, months,SITE_INFO):
     for month in months:
-        setpoint_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '06. PPC Setpoint', '*.xlsx'))[0]
-        df_setpoint_month = pd.read_csv(setpoint_path, header = 0)
-
-        print(df_setpoint_month)
+        setpoint_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '06. PPC Setpoint', '*.csv'))[0]
+        print(setpoint_path)
+        df_setpoint_month = pd.read_csv(setpoint_path,sep=';', encoding='latin', on_bad_lines='skip')
 
         try:
             df_setpoint = pd.concat([df_setpoint, df_setpoint_month])
@@ -315,18 +314,54 @@ def get_setpoint_data(site, months):
                                 'Estado': "Setpoint value",
                                 'Descrição': 'Setpoint active'}, inplace=True)
 
+
+
     #SELECT RELEVANT DATA
-    df_setpoint = df_setpoint[['Setpoint value', 'Setpoint active', 'Level']]
+    df_setpoint = df_setpoint[['Timestamp','Setpoint value', 'Setpoint active', 'Level']]
     df_setpoint = df_setpoint.loc[df_setpoint["Level"].str.contains('PPC_MLG - MLG')]
 
+
+    #TRANSFORM DATA AND ORDER TABLE
+    df_setpoint["Timestamp"] = [pd.to_datetime(re.search(r'.*\s\d+\:\d+\:\d+', ts.replace(',', ' ')).group(),
+                                          format = "%d/%m/%Y %H:%M:%S") for ts in df_setpoint["Timestamp"]]
+
+    df_setpoint["Setpoint value"] = [round(float(value.replace(',','.')) * 1000) for value in df_setpoint["Setpoint value"]]
+
+    df_setpoint = df_setpoint.sort_values(by=["Timestamp"],ascending=True).reset_index(drop = True)
+    print(df_setpoint)
+
     #GET EVENTS TIMESTAMPS
-    events_start = df_setpoint['Timestamp']
-    events_end = events_start
+    nominal_power_dc = float(SITE_INFO.loc["Milagres", 'Nominal Power DC'])
+    max_export_setpoint = float(SITE_INFO.loc["Milagres", 'Maximum Export Capacity'])
+    print(max_export_setpoint)
+
+    events_active_index = list(df_setpoint.loc[df_setpoint["Setpoint value"] < max_export_setpoint].index)
+    events_end_index = list(df_setpoint.loc[df_setpoint["Setpoint value"] == max_export_setpoint].index)
+    events_start_index = [i + 1 for i in events_end_index if i + 1 in events_active_index]
+
+    min_index_start = min(events_start_index)
+    max_index_end = max(events_end_index)
+
+    events_start_index = [i for i in events_start_index if i < max_index_end]
+    events_end_index = [i for i in events_end_index if i > min_index_start and i+1 in events_active_index]
+
+    events_start_df = df_setpoint.loc[events_start_index,:]
+    events_end_df = df_setpoint.loc[events_end_index, :]
+
+    df_dict = {"Site Name": [site] * len(events_start_index),
+               "Component": ["Milagres"] * len(events_start_index),
+               "Capacity related component": [nominal_power_dc] * len(events_start_index),
+               "Status": ["Curtailment"] * len(events_start_index),
+               "Event Start Time": list(events_start_df["Timestamp"]),
+               "Event End Time": list(events_end_df["Timestamp"]),
+               "Duration (h)": [pd.NA] * len(events_start_index),
+               "Active hours (h)": [pd.NA] * len(events_start_index),
+               "Irradiation period": [pd.NA] * len(events_start_index),
+               "Energy lost (kWh)": [pd.NA] * len(events_start_index),
+               "Weighted downtime %": [pd.NA] * len(events_start_index),
+               "Approved": ["x"] * len(events_start_index)}
+
+    curtailment_df = pd.DataFrame.from_dict(df_dict)
 
 
-
-
-
-    curtailment_inc = 'a'
-
-    return curtailment_inc
+    return curtailment_df
