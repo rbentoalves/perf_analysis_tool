@@ -32,6 +32,8 @@ def get_site_level_data(site, analysis_start_date, analysis_end_date, months):
     # Get start row of data, path to file and dataframe
     start_row = 6
 
+    analysis_end_date_eff = analysis_end_date + dt.timedelta(days=1)
+
 
     for month in months:
         power_export_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '02. Power', '*.xlsx'))[0]
@@ -49,7 +51,7 @@ def get_site_level_data(site, analysis_start_date, analysis_end_date, months):
     granularity = (df_power_site.index[1] - df_power_site.index[0]).seconds / 3600
 
     # Get dataset filtered by night values and timestamps
-    power_period = df_power_site[analysis_start_date:analysis_end_date]
+    power_period = df_power_site[analysis_start_date:analysis_end_date_eff]
     site_power_period = power_period[["Site Power"]]*1000
     site_power_filtered = site_power_period.loc[~(site_power_period["Site Power"] < 0)]
 
@@ -58,7 +60,7 @@ def get_site_level_data(site, analysis_start_date, analysis_end_date, months):
 
     return site_power_period, site_power_filtered, total_energy_period
 
-def get_meter_data(site, analysis_start_date, analysis_end_date, months):
+def get_meter_data(site, analysis_start_ts, analysis_end_ts, months):
     # Get start row of data, path to file and dataframe
 
     for month in months:
@@ -81,23 +83,22 @@ def get_meter_data(site, analysis_start_date, analysis_end_date, months):
     granularity = (df_meter_site.index[1] - df_meter_site.index[0]).seconds / 3600
 
     #Filter data for period in question
-    meter_period = df_meter_site[analysis_start_date:analysis_end_date]
-    meter_period["Meter Power (kWh)"] = (meter_period["Meter Energy (MWh)"] * 1000) / granularity
+    meter_period = df_meter_site[analysis_start_ts:analysis_end_ts]
+    meter_period["Meter Power (kW)"] = (meter_period["Meter Energy (MWh)"] * 1000) / granularity
 
     # Calculate total energy exported in period
     total_energy_meter_kwh = meter_period["Meter Energy (MWh)"].sum() * 1000
 
-    return meter_period[["Meter Power (kWh)"]], total_energy_meter_kwh
+    return meter_period[["Meter Power (kW)"]], total_energy_meter_kwh
 
 
-def get_inverter_level_data(site, analysis_start_date, analysis_end_date, months, irradiance_period, datapoint):
-    print(irradiance_period.columns)
+def get_inverter_level_data(site, analysis_start_ts, analysis_end_ts, months, irradiance_period, datapoint):
     start_row = 6
-    #inverter_data_path = glob(os.path.join(os.getcwd(), 'PerfData', site, '04. Inverter Power', datapoint, '*.xlsx'))
+
     for month in months:
         inverter_data_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '04. Inverter Power', datapoint,
                                                '*.xlsx'))  # replace general_folder with os.getcwd()
-        dfs_list = [pd.read_excel(path, header=start_row, index_col=0)[analysis_start_date:analysis_end_date] for path
+        dfs_list = [pd.read_excel(path, header=start_row, index_col=0)[analysis_start_ts:analysis_end_ts] for path
                     in inverter_data_path]
         dfs_list = [df.rename_axis('Timestamp (15m)') for df in dfs_list]
         all_data_df_month = pd.concat(dfs_list, axis=1)
@@ -112,7 +113,7 @@ def get_inverter_level_data(site, analysis_start_date, analysis_end_date, months
 
     return all_data_df
 
-def get_irradiance_period(site, analysis_start_date, analysis_end_date, months):
+def get_irradiance_period(site, analysis_start_ts, analysis_end_ts, months, round_to: int = 15):
     # Get start row of data, path to file and dataframe
     start_row = 5
     #irradiance_path = glob(os.path.join(os.getcwd(), 'PerfData', site, '03. GHI-POA' , '*.xlsx'))[0]
@@ -141,19 +142,22 @@ def get_irradiance_period(site, analysis_start_date, analysis_end_date, months):
     df_irradiance["Avg Irradiance POA"] = df_irradiance[columns_poa].mean(axis=1)
     df_irradiance["Avg Irradiance GHI"] = df_irradiance[columns_ghi].mean(axis=1)
 
-    raw_irradiance_period = df_irradiance[analysis_start_date:analysis_end_date]
+    raw_irradiance_period = df_irradiance[analysis_start_ts:analysis_end_ts]
     irradiance_filtered = df_irradiance.loc[(df_irradiance["Avg Irradiance POA"] > 0)][
-                          analysis_start_date:analysis_end_date]
+                          analysis_start_ts:analysis_end_ts]
 
     # Get 15min dataset
-    raw_irradiance_period["Timestamp (15m)"] = list(
-        pd.Series(raw_irradiance_period.index).dt.round('15min', 'shift_forward'))
-    irradiance_period_15m = raw_irradiance_period.groupby(['Timestamp (15m)']).mean()
+    column_name = "Timestamp (" + str(round_to) + "m)"
+    round_to_str = str(round_to) + "min"
+
+    raw_irradiance_period[column_name] = list(
+        pd.Series(raw_irradiance_period.index).dt.round(round_to_str, 'shift_forward'))
+    irradiance_period_rounded = raw_irradiance_period.groupby([column_name]).mean()
 
     # Calculate total irradiance in period
     total_irradiance_period = (irradiance_filtered["Avg Irradiance POA"].sum() / 1000) * granularity
 
-    return raw_irradiance_period, irradiance_period_15m, irradiance_filtered, total_irradiance_period
+    return raw_irradiance_period, irradiance_period_rounded, irradiance_filtered, total_irradiance_period
 
 def get_incident_timestamps(df_relevant_data, prev_ts, next_ts, df_timedelta):
     for index_i in range(len(df_relevant_data)):
@@ -283,17 +287,28 @@ def get_incidents_df(all_data_df, component_data, site):
 
     return df_all_incidents
 
-def read_Event_Tracker(site):
+def read_Event_Tracker(site, approved: bool = False):
     try:
-        event_tracker_path = glob(os.path.join(os.getcwd(), 'Results', site, '*.xlsx'))[0]
+        event_tracker_path = glob(os.path.join(os.getcwd(), 'Results', site, 'Event Tracker ' + site + '.xlsx'))[0]
         print(event_tracker_path)
-        df_incidents_ET = pd.read_excel(event_tracker_path, sheet_name='Incidents')
+        if approved:
+            df_incidents_ET = pd.read_excel(event_tracker_path, sheet_name='Approved Incidents')
+        else:
+            df_incidents_ET = pd.read_excel(event_tracker_path, sheet_name='Incidents')
 
     except IndexError:
         df_incidents_ET = pd.DataFrame()
+        curtailment_df_ET = pd.DataFrame()
 
+        return df_incidents_ET, curtailment_df_ET
 
-    return df_incidents_ET
+    try:
+        curtailment_df_ET = pd.read_excel(event_tracker_path, sheet_name='Curtailment incidents')
+
+    except ValueError:
+        curtailment_df_ET = pd.DataFrame()
+
+    return df_incidents_ET, curtailment_df_ET
 
 
 def get_setpoint_data(site, months,SITE_INFO):
