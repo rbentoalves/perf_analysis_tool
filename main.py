@@ -15,34 +15,39 @@ import exportData
 
 def populate_results_df(site, budget_values_date, pr_period, pot_pr_period, corr_pot_pr_period, raw_site_avail,
                         corr_site_avail,total_energy_period, total_irradiance_period, raw_energy_lost, corr_energy_lost,
-                        budget_pr,budget_prod, budget_irr, total_curtailment_loss, curtailment_summary):
+                        budget_pr,budget_prod, budget_irr, total_curtailment_loss, expected_energy, expected_pr):
 
     raw = [None, None,None, None, None, None, None]
     corrected = [None, None, None, None, None, None, None]
-    budget = ['100.00 %', None, None, None, None, '0', '0']
+    expected = [None, None, None, '100.00 %', None, '0', '0']
+    budget = [None, None, None, '100.00 %', None, '0', '0']
 
-    raw[0] = format(raw_site_avail, ".2%")
+    raw[0] = format(total_energy_period / 1000, ".2f")
     raw[1] = format(pr_period, ".2%")
     raw[2] = format(pot_pr_period, ".2%")
-    raw[3] = format(total_energy_period / 1000, ".2f")
+    raw[3] = format(raw_site_avail, ".2%")
     raw[4] = format(total_irradiance_period, ".2f")
     raw[5] = format(raw_energy_lost/1000, ".2f")
     raw[6] = format(total_curtailment_loss/1000, ".2f")
 
-    corrected[0] = format(corr_site_avail, ".2%")
+    corrected[0] = format(total_energy_period/1000, ".2f")
     corrected[1] = format(pr_period, ".2%")
     corrected[2] = format(corr_pot_pr_period, ".2%")
-    corrected[3] = format(total_energy_period/1000, ".2f")
+    corrected[3] = format(corr_site_avail, ".2%")
     corrected[4] = format(total_irradiance_period, ".2f")
     corrected[5] = format(corr_energy_lost/1000, ".2f")
     corrected[6] = format(total_curtailment_loss/1000, ".2f")
 
+    expected[0] = format(expected_energy, ".2f")
+    expected[1] = format(expected_pr, ".2%")
+    expected[4] = format(total_irradiance_period, ".2f")
+
+    budget[0] = format(budget_prod.loc[site, budget_values_date], ".2f")
     budget[1] = format(budget_pr.loc[site, budget_values_date], ".2%")
-    budget[3] = format(budget_prod.loc[site, budget_values_date], ".2f")
     budget[4] = format(budget_irr.loc[site, budget_values_date], ".2f")
 
 
-    return raw, corrected, budget
+    return raw, corrected, expected, budget
 
 def complete_site_data_df(site_data, site, all_general_info, budget_pr, df_incidents_period):
 
@@ -152,8 +157,9 @@ def kpis_analysis(site, analysis_start_ts, analysis_end_ts, months, SITE_INFO):
     else:
         all_curtailment_df = curtailment_df
 
-    # Calculate PR%
-    status_window_run_all.info("Calculating performance ratios")
+    # Calculate PR% and other KPIs
+    status_window_run_all.info("Calculating performance ratios and other KPIs")
+    expected_energy = curtailment_summary.at["Expected Energy (MWh)", site]
     raw_energy_lost = df_incidents_period["Energy lost (kWh)"].sum()
     corr_energy_lost = df_approved_incidents_period["Energy lost (kWh)"].sum()
 
@@ -164,18 +170,21 @@ def kpis_analysis(site, analysis_start_ts, analysis_end_ts, months, SITE_INFO):
     corr_pot_pr_period = ((total_energy_meter + corr_energy_lost + total_curtailment_loss) /
                           (total_irradiance_period * SITE_INFO.loc[site, 'Nominal Power DC']))
 
+    expected_pr = expected_energy / (total_irradiance_period * SITE_INFO.loc[site, 'Nominal Power DC'])
+
     #Populate results table
     status_window_run_all.info("Populating tables")
-    raw, corrected, budget = populate_results_df(site, budget_values_date, pr_period, pot_pr_period, corr_pot_pr_period,
-                                              raw_site_avail,corr_site_avail, total_energy_meter,
-                                              total_irradiance_period, raw_energy_lost, corr_energy_lost, budget_pr,
-                                              budget_prod, budget_irr, total_curtailment_loss, curtailment_summary)
+    raw, corrected, expected, budget = populate_results_df(site, budget_values_date, pr_period, pot_pr_period,
+                                                           corr_pot_pr_period, raw_site_avail,corr_site_avail,
+                                                           total_energy_meter, total_irradiance_period, raw_energy_lost,
+                                                           corr_energy_lost, budget_pr, budget_prod, budget_irr,
+                                                           total_curtailment_loss, expected_energy, expected_pr)
 
     #Update Event tracker
     status_window_run_all.info("Updating Event Tracker")
     exportData.create_Event_Tracker(df_all_incidents, site, all_curtailment_df)
 
-    return (get_results_table(site, raw, corrected, budget), get_chart_results(site, site_data), site_data,
+    return (get_results_table(site, raw, corrected, expected, budget), get_chart_results(site, site_data), site_data,
             df_incidents_period, curtailment_df)
 
 
@@ -266,14 +275,16 @@ def inverter_outages_analysis(all_data_df, site, analysis_start_ts, analysis_end
 def get_results_table(site = False,
                       raw= [None, None, None, None, None, None, None],
                       corrected=[None, None, None, None, None, None, None],
+                      expected=[None, None, None, None, None, None, None],
                       budget=[None, None, None, None, None, None, None]):
 
     data = {
         'Raw':raw, # Placeholder for raw values
         "Corrected": corrected,  # Placeholder for corrected values
+        "Expected" : expected, # Placeholder for expected values
         "Budget": budget  # Placeholder for budget values
     }
-    index = ["Availability:", "PR(%):", "Potential PR(%):", "Energy Produced (MWh):", "Irradiation:",
+    index = ["Energy Produced (MWh):", "PR(%):", "Potential PR(%):", "Availability:", "Irradiation:",
              "Outage Losses (MWh):", "Curtailment Losses (MWh)"]
     # Create the DataFrame
     return pd.DataFrame(data, index=index)
