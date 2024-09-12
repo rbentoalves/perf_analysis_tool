@@ -67,7 +67,10 @@ def get_meter_data(site, analysis_start_ts, analysis_end_ts, months):
         meter_export_path = glob(os.path.join(os.getcwd(), 'PerfData', month, site, '01. Energy', '*.xlsx'))[0]
         df_meter_site_month = pd.read_excel(meter_export_path,
                                             sheet_name='BASE_MWh_FORMULA', index_col=0)[["kWh rec int"]]
-        df_meter_site_month = df_meter_site_month.drop(labels=0)
+        try:
+            df_meter_site_month = df_meter_site_month.drop(labels=0)
+        except KeyError:
+            pass
 
 
         try:
@@ -351,7 +354,7 @@ def get_setpoint_data(site, months,SITE_INFO):
     print(max_export_setpoint)
 
     events_active_index = list(df_setpoint.loc[df_setpoint["Setpoint value"] < max_export_setpoint].index)
-    events_end_index = list(df_setpoint.loc[df_setpoint["Setpoint value"] == max_export_setpoint].index)
+    events_end_index = list(df_setpoint.loc[df_setpoint["Setpoint value"] >= max_export_setpoint].index)
     events_start_index = [i + 1 for i in events_end_index if i + 1 in events_active_index]
 
     min_index_start = min(events_start_index)
@@ -359,6 +362,9 @@ def get_setpoint_data(site, months,SITE_INFO):
 
     events_start_index = [i for i in events_start_index if i < max_index_end]
     events_end_index = [i for i in events_end_index if i > min_index_start and i+1 in events_active_index]
+
+    if max_index_end not in events_end_index:
+        events_end_index.append(max_index_end)
 
     events_start_df = df_setpoint.loc[events_start_index,:]
     events_end_df = df_setpoint.loc[events_end_index, :]

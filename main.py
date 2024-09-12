@@ -38,7 +38,7 @@ def populate_results_df(site, budget_values_date, pr_period, pot_pr_period, corr
     corrected[5] = format(corr_energy_lost/1000, ".2f")
     corrected[6] = format(total_curtailment_loss/1000, ".2f")
 
-    expected[0] = format(expected_energy, ".2f")
+    expected[0] = format(expected_energy/1000, ".2f")
     expected[1] = format(expected_pr, ".2%")
     expected[4] = format(total_irradiance_period, ".2f")
 
@@ -159,7 +159,7 @@ def kpis_analysis(site, analysis_start_ts, analysis_end_ts, months, SITE_INFO):
 
     # Calculate PR% and other KPIs
     status_window_run_all.info("Calculating performance ratios and other KPIs")
-    expected_energy = curtailment_summary.at["Expected Energy (MWh)", site]
+    expected_energy = curtailment_summary.at["Expected Energy (MWh)", site] * 1000
     raw_energy_lost = df_incidents_period["Energy lost (kWh)"].sum()
     corr_energy_lost = df_approved_incidents_period["Energy lost (kWh)"].sum()
 
